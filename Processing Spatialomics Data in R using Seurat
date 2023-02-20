@@ -1,0 +1,82 @@
+#Making the Seurat Object and assigning it to variable "brain". Make sure to unload the TAR files to get the images with command tar -xvzf in terminal
+#Name your dataframe, add path to directory that contains the file as well as the "spatial" folder with low res image. Also put the name of the file and name the slice. 
+df <- Load10X_Spatial(
+  data.dir = "C:/path/to/directory/",
+    filename = "filename.h5",
+  assay = "Spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL,
+)
+
+#These next plots are to look at molecule abundance variation and will be done before normalization. 
+#preliminary step to visiualize the raw molecule counts in the tissue slice.
+plot1 <- VlnPlot(df, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+plot2 <- SpatialFeaturePlot(df, features = "nCount_Spatial") + theme(legend.position = "right")
+wrap_plots(plot1, plot2)
+
+#Normalize using SCTransform rather than LogNormalize() to account for differences in molecule count in different tissues. If tissue is homogenous maybe use LogNormalize()
+df <- SCTransform(df, assay = "Spatial", verbose = FALSE)
+
+
+#Overlay of sequencing data over histology.
+#SpatialFeaturePlot(df, features = c("gene1", "gene2"))
+
+###dimensionality reduction
+df <- RunPCA(df, assay = "SCT", verbose = FALSE)
+df <- FindNeighbors(df, reduction = "pca", dims = 1:30)
+df <- FindClusters(df, verbose = FALSE)
+df <- RunUMAP(df, reduction = "pca", dims = 1:30)
+
+#Visualize dimensionality reduction. Gives UMAP plot showing clusters as well as those clusters spaitally on tissue. 
+p1 <- DimPlot(df, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(df, label = TRUE, label.size = 3, pt.size.factor = 1.8)
+p1 + p2
+
+###Visualizing specific clusters. This visualizes cluster 2,1,4,3,5,6. This highlights only specific clusters on their own.
+###obviously you can visualize whatever clusters you want, this is just an example of how you could call multiple clusters
+SpatialDimPlot(df, cells.highlight = CellsByIdentities(object = df, idents = c(2, 1, 4, 3,
+    5, 8)), facet.highlight = TRUE, ncol = 3, pt.size.factor = 1.8)
+
+#Identifying spacially variable features. The plan("multisession") command is used to parallelize this command and therefore will use all cpu cores.
+#Be prepared for your PC to run at full tilt. Proper airflow needed.
+plan("multisession")
+plan()
+df <- FindSpatiallyVariableFeatures(df, assay = "SCT", verbose = TRUE, features = VariableFeatures(df)[1:1000], selection.method = "markvariogram")
+
+#Visualize top 6 features identified by this method
+top.features <- head(SpatiallyVariableFeatures(df, selection.method = "markvariogram"), 6)
+SpatialFeaturePlot(df, features = top.features, ncol = 3, alpha = c(0.1, 1), pt.size.factor = 1.8)
+ 
+
+###loading slice of posterior brain 
+df2 <- Load10X_Spatial(
+  data.dir = "C:/path/to/directory",
+    filename = "filename.h5",
+  assay = "Spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL,
+)
+###Normalize second section of brain
+df2 <- SCTransform(df2, assay = "Spatial", verbose = FALSE)
+
+####Merge the two Seurat objects you can name this anyting you want. does not have to be something.merge.
+df.merge <- merge(df,df2)
+
+###Dimensionality Reduction
+DefaultAssay(df.merge) <- "SCT"
+VariableFeatures(df.merge) <- c(VariableFeatures(df), VariableFeatures(df2))
+df.merge <- RunPCA(df.merge, verbose = FALSE)
+df.merge <- FindNeighbors(df.merge, dims = 1:30)
+df.merge <- FindClusters(df.merge, verbose = FALSE)
+df.merge <- RunUMAP(df.merge, dims = 1:30)
+
+####Visualize combined images
+DimPlot(df.merge, reduction = "umap", group.by = c("ident", "orig.ident"))
+
+###comparing gene expression between both slices.
+SpatialFeaturePlot(df.merge, features = c("gene1", "gene2"))
+
